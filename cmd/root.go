@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/spf13/cobra"
-	"github.com/spf13/cobra/doc"
 )
 
 var sess *session.Session
@@ -29,10 +27,6 @@ var rootFlags struct {
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := doc.GenMarkdownTree(rootCmd, "/tmp")
-	if err != nil {
-		log.Fatal(err)
-	}
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

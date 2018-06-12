@@ -2,12 +2,15 @@ package aws
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/elb"
+	"github.com/tj/go-progress"
 )
 
 // Deletable provides an interface for any EC2 resource that can be deleted
@@ -24,61 +27,51 @@ type Sweetener interface {
 
 // EC2Instance is a proxy for the AWS framework struct
 type EC2Instance struct {
-	ec2.Instance
+	*ec2.Instance
 }
 
-// ListInstances is still To Be Done
-func ListInstances(s *session.Session, list []*string) ([]EC2Instance, error) {
+var _ = Deletable(&EC2Instance{})
+
+// ListInstances returns the list of EC2Instance for the specific ids provided
+func ListInstances(s *session.Session, ids []*string) ([]EC2Instance, error) {
 	ec2C := ec2.New(s)
-	result, err := ec2C.DescribeInstances(&ec2.DescribeInstancesInput{
-		InstanceIds: list,
+	res, err := ec2C.DescribeInstances(&ec2.DescribeInstancesInput{
+		InstanceIds: ids,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't list instances: %s", err)
 	}
-	_ = result
-	// for i := range result.Reservations {
-	// 	for _, is := range result.Reservations[i].Instances {
-	// 		var name string
-	// 		for _, tag := range is.Tags {
-	// 			if *tag.Key == "Name" {
-	// 				name = *tag.Value
-	// 			}
-	// 		}
-	// 		for _, vol := range is.BlockDeviceMappings {
-	// 			volTags := make([]*ec2.Tag, len(tagList)+1)
-	// 			volTags = append(volTags, &ec2.Tag{
-	// 				Key:   aws.String("Name"),
-	// 				Value: aws.String(name),
-	// 			})
-	// 			for key, val := range tagList {
-	// 				volTags = append(volTags, &ec2.Tag{
-	// 					Key:   aws.String(key),
-	// 					Value: aws.String(val),
-	// 				})
-	// 			}
-	// 			volTags = append(volTags, &ec2.Tag{
-	// 				Key:   aws.String("mount_point"),
-	// 				Value: vol.DeviceName,
-	// 			})
-	// 			ts := &ec2.TagSpecification{
-	// 				Tags:         volTags,
-	// 				ResourceType: aws.String(ec2.ResourceTypeSnapshot),
-	// 			}
-	// 			sn := &ec2.CreateSnapshotInput{
-	// 				VolumeId:          vol.Ebs.VolumeId,
-	// 				Description:       aws.String(name),
-	// 				TagSpecifications: []*ec2.TagSpecification{ts},
-	// 			}
-	// 			res, err := ec2cli.CreateSnapshot(sn)
-	// 			if err != nil {
-	// 				log.Printf("Couldn't snapshot %s: %s\n", *vol.Ebs.VolumeId, err.Error())
-	// 			}
-	// 			fmt.Printf("Snapshot %s started for volume %s\n", *res.SnapshotId, *vol.Ebs.VolumeId)
-	// 		}
-	// 	}
-	// }
-	return nil, nil
+	var list []EC2Instance
+	for i := range res.Reservations {
+		for _, is := range res.Reservations[i].Instances {
+			list = append(list, EC2Instance{is})
+		}
+	}
+	return list, nil
+}
+
+// Type returns the EC2 type
+func (e EC2Instance) Type() string { return "EC2" }
+
+// Name returns the EC2 Instance name
+func (e EC2Instance) Name() string {
+	for i := range e.Tags {
+		if e.Tags[i].Key == aws.String("Name") {
+			return *e.Tags[i].Value
+		}
+	}
+	return *e.InstanceId
+}
+
+// Delete the LoadBalancer
+func (e EC2Instance) Delete(s *session.Session) error {
+	ec2C := ec2.New(s)
+	if _, err := ec2C.TerminateInstances(&ec2.TerminateInstancesInput{
+		InstanceIds: []*string{e.InstanceId},
+	}); err != nil {
+		return fmt.Errorf("Couldn't delete EC2 instance [%s]: %s", e.Name(), err)
+	}
+	return nil
 }
 
 // LoadBalancer is a proxy for the AWS framework struct
@@ -96,7 +89,7 @@ func ListInactiveLoadBalancers(s *session.Session) ([]LoadBalancer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't list load balancers: %s", err)
 	}
-	var list []LoadBalancer
+	list := make([]LoadBalancer, 0, len(res.LoadBalancerDescriptions))
 	for _, lb := range res.LoadBalancerDescriptions {
 		if len(lb.Instances) == 0 {
 			list = append(list, LoadBalancer{lb})
@@ -129,6 +122,8 @@ type NetworkInterface struct {
 
 var _ = Deletable(&NetworkInterface{})
 
+// ListUnattachedNetworkInterfaces returns a list of NetworkInterface
+// that are currently not attached to an EC2Instance
 func ListUnattachedNetworkInterfaces(s *session.Session) ([]NetworkInterface, error) {
 	ec2C := ec2.New(s)
 	res, err := ec2C.DescribeNetworkInterfaces(&ec2.DescribeNetworkInterfacesInput{
@@ -142,17 +137,20 @@ func ListUnattachedNetworkInterfaces(s *session.Session) ([]NetworkInterface, er
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't list network interfaces: %s", err)
 	}
-	var list []NetworkInterface
+	list := make([]NetworkInterface, 0, len(res.NetworkInterfaces))
 	for _, ni := range res.NetworkInterfaces {
 		list = append(list, NetworkInterface{ni})
 	}
 	return list, nil
 }
 
+// Type returns the Network Interface type
 func (ni NetworkInterface) Type() string { return "Network Interface" }
 
+// Name returns the NetworkInterface ID
 func (ni NetworkInterface) Name() string { return *ni.NetworkInterfaceId }
 
+// Delete the NetworkInterface
 func (ni NetworkInterface) Delete(s *session.Session) error {
 	ec2C := ec2.New(s)
 	if _, err := ec2C.DeleteNetworkInterface(&ec2.DeleteNetworkInterfaceInput{
@@ -171,6 +169,7 @@ type EBSVolume struct {
 var _ = Deletable(&EBSVolume{})
 var _ = Sweetener(&EBSVolume{})
 
+// ListAvailableEBS returns a list of Available EBSVolume
 func ListAvailableEBS(s *session.Session) ([]EBSVolume, error) {
 	ec2C := ec2.New(s)
 	res, err := ec2C.DescribeVolumes(&ec2.DescribeVolumesInput{
@@ -184,17 +183,20 @@ func ListAvailableEBS(s *session.Session) ([]EBSVolume, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't list EBS volumes: %s", err)
 	}
-	var list []EBSVolume
+	list := make([]EBSVolume, 0, len(res.Volumes))
 	for _, ni := range res.Volumes {
 		list = append(list, EBSVolume{ni})
 	}
 	return list, nil
 }
 
+// Type returns the EBS type
 func (v EBSVolume) Type() string { return "EBS" }
 
+// Name returns the Volume ID
 func (v EBSVolume) Name() string { return *v.VolumeId }
 
+// Delete the EBSVolume
 func (v EBSVolume) Delete(s *session.Session) error {
 	ec2C := ec2.New(s)
 	if _, err := ec2C.DeleteVolume(&ec2.DeleteVolumeInput{
@@ -239,13 +241,14 @@ type Snapshot struct {
 	*ec2.Snapshot
 }
 
+// Wait for the Snapshot to finish before doing anything else
 func (snap *Snapshot) Wait(s *session.Session) error {
 	ec2C := ec2.New(s)
 	fmt.Printf("Starting to monitor snapshot [%s]. This can take a few minutes...\n",
 		*snap.SnapshotId)
-	// TODO: Integrate TermUI ?
-	// https://github.com/gizak/termui
-	ticker := time.NewTicker(2 * time.Minute)
+	bar := progress.NewInt(100)
+	bar.Text(*snap.SnapshotId)
+	ticker := time.NewTicker(1 * time.Minute)
 	var lastPercent string
 	defer ticker.Stop()
 	for {
@@ -264,11 +267,11 @@ func (snap *Snapshot) Wait(s *session.Session) error {
 					return nil
 				}
 				if lastPercent != *ws.Progress {
-					fmt.Print("\n")
 					lastPercent = *ws.Progress
-					fmt.Print(lastPercent)
+					percentInt, _ := strconv.Atoi(lastPercent[:len(lastPercent)-1])
+					bar.ValueInt(percentInt)
+					bar.WriteTo(os.Stdout)
 				}
-				fmt.Print(".")
 			}
 		}
 	}

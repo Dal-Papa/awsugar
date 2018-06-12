@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	awssdk "github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	multierror "github.com/hashicorp/go-multierror"
 	"github.com/spf13/cobra"
 
@@ -28,11 +30,14 @@ var cleanCmd = &cobra.Command{
 
 var cleanFlags struct {
 	SweetClean bool
+	EC2List    []string
 }
 
 func cleanFunc(cmd *cobra.Command, args []string) {
 	resource := args[0]
 	switch resource {
+	case "ec2":
+		cleanEC2()
 	case "elb":
 		cleanELB()
 	case "ebs":
@@ -49,6 +54,9 @@ func init() {
 
 	cleanCmd.PersistentFlags().BoolVarP(&cleanFlags.SweetClean, "sweet-clean",
 		"s", true, "allow some preparation before cleaning (snapshot, etc.)")
+
+	cleanCmd.Flags().StringSliceVar(&cleanFlags.EC2List, "ids", []string{},
+		"List of EC2 instance IDs to clean")
 }
 
 func cleanAbstractList(list []aws.Deletable) error {
@@ -76,6 +84,44 @@ func sweetenList(list []aws.Sweetener) error {
 		}
 	}
 	return retErr.ErrorOrNil()
+}
+
+func cleanEC2() {
+	idList := make([]*string, 0, len(cleanFlags.EC2List))
+	for i := range cleanFlags.EC2List {
+		idList = append(idList, &cleanFlags.EC2List[i])
+	}
+	res, err := aws.ListInstances(sess, idList)
+	if err != nil {
+		log.Fatal(err)
+	}
+	deletableList := make([]aws.Deletable, len(res))
+	for i, d := range res {
+		deletableList[i] = d
+	}
+	if cleanFlags.SweetClean {
+		var sweetList []aws.Sweetener
+		for i := range res {
+			for j := range res[i].BlockDeviceMappings {
+				ebsVolume := aws.EBSVolume{&ec2.Volume{}}
+				ebsVolume.VolumeId = res[i].BlockDeviceMappings[j].Ebs.VolumeId
+				ebsVolume.SetTags(res[i].Tags)
+				ebsVolume.Tags = append(ebsVolume.Tags, &ec2.Tag{
+					Key:   awssdk.String("mount_point"),
+					Value: res[i].BlockDeviceMappings[j].DeviceName,
+				})
+				sweetList = append(sweetList, ebsVolume)
+			}
+		}
+		// To prevent still deleting if error while sweetening.
+		// Need to do at the item level.
+		if err := sweetenList(sweetList); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if err := cleanAbstractList(deletableList); err != nil {
+		log.Println(err)
+	}
 }
 
 func cleanELB() {
