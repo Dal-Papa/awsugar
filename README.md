@@ -1,17 +1,25 @@
 Aws Working Sugar
 ===
 
+[![Build Status](https://travis-ci.org/Dal-Papa/awsugar.svg?branch=master)](https://travis-ci.org/Dal-Papa/awsugar)
+[![GoDoc](https://godoc.org/github.com/Dal-Papa/awsugar?status.svg)](https://godoc.org/github.com/Dal-Papa/awsugar)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Dal-Papa/awsugar)](https://goreportcard.com/report/github.com/Dal-Papa/awsugar)
+
 AWS Working Sugar provides a set of useful tools for
 	your day to day AWS duties.
 
 
 ## Install
 
-~~~bash
+```
 go get github.com/Dal-Papa/awsugar
-~~~
+```
 
 ## Usage
+
+```
+awsugar [command] [args]
+```
 
 ### Options
 
@@ -32,8 +40,8 @@ Clean your AWS account in various places including:
 	- Remove deprecated ELB without target instances
 	- Remove available volumes and snapshot them
 	- Release unattached Elastic IPs and Network Interfaces
-	- Remove unused Security Groups
-	- Remove unused Launch Configurations
+	- Remove unused Security Groups (TODO)
+	- Remove unused Launch Configurations (TODO)
 
 ```
 awsugar clean [type] [flags]

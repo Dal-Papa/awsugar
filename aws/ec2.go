@@ -128,7 +128,7 @@ func ListUnattachedNetworkInterfaces(s *session.Session) ([]NetworkInterface, er
 	ec2C := ec2.New(s)
 	res, err := ec2C.DescribeNetworkInterfaces(&ec2.DescribeNetworkInterfacesInput{
 		Filters: []*ec2.Filter{
-			&ec2.Filter{
+			{
 				Name:   aws.String("status"),
 				Values: []*string{aws.String("available")},
 			},
@@ -174,7 +174,7 @@ func ListAvailableEBS(s *session.Session) ([]EBSVolume, error) {
 	ec2C := ec2.New(s)
 	res, err := ec2C.DescribeVolumes(&ec2.DescribeVolumesInput{
 		Filters: []*ec2.Filter{
-			&ec2.Filter{
+			{
 				Name:   aws.String("status"),
 				Values: []*string{aws.String("available")},
 			},
@@ -223,7 +223,7 @@ func (v EBSVolume) Sweeten(s *session.Session) error {
 		Description: name,
 		VolumeId:    v.VolumeId,
 		TagSpecifications: []*ec2.TagSpecification{
-			&ec2.TagSpecification{
+			{
 				ResourceType: aws.String(ec2.ResourceTypeSnapshot),
 				Tags:         tags,
 			},
